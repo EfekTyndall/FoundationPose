@@ -47,6 +47,10 @@ def run_pose_estimation_worker(reader, i_frames, est:FoundationPose, debug=False
   est.glctx = dr.RasterizeCudaContext(device)
   debug_dir = est.debug_dir
 
+  # Define to_origin and bbox for visual rendering
+  to_origin, extents = trimesh.bounds.oriented_bounds(est.mesh)
+  bbox = np.stack([-extents / 2, extents / 2], axis=0).reshape(2, 3)
+
   for i in range(len(i_frames)):
     i_frame = i_frames[i]
     id_str = reader.id_strs[i_frame]
@@ -62,19 +66,43 @@ def run_pose_estimation_worker(reader, i_frames, est:FoundationPose, debug=False
     if ob_id not in scene_ob_ids:
       logging.info(f'skip {ob_id} as it does not exist in this scene')
       continue
+    
+    # Fetch object mask
     ob_mask = get_mask(reader, i_frame, ob_id, detect_type=detect_type)
 
-    est.gt_pose = reader.get_gt_pose(i_frame, ob_id)
-    pose = est.register(K=reader.K, rgb=color, depth=depth, ob_mask=ob_mask, ob_id=ob_id, iteration=5)
-    logging.info(f"pose:\n{pose}")
+    if i == 0:
+      # Step 1: Initial Pose Estimation for the first frame
+      est.gt_pose = reader.get_gt_pose(i_frame, ob_id)
+      pose = est.register(K=reader.K, rgb=color, depth=depth, ob_mask=ob_mask, ob_id=ob_id, iteration=5)
+      logging.info(f"Initial pose:\n{pose}")
 
+      # Debugging: save the transformed model for visualization
+      if debug>=3:
+        tmp = est.mesh_ori.copy()
+        tmp.apply_transform(pose)
+        tmp.export(f'{debug_dir}/model_tf.obj')
+    else:
+      # Step 2: Pose Tracking for subsequent frames
+      pose = est.track_one(rgb=color, depth=depth, K=reader.K, iteration=2)
 
-    if debug>=3:
-      tmp = est.mesh_ori.copy()
-      tmp.apply_transform(pose)
-      tmp.export(f'{debug_dir}/model_tf.obj')
-
+    # Save pose result for this frame
     result[video_id][id_str][ob_id] = pose
+
+    # Debug level 1: Visualization with bounding box and axis
+    if debug >= 1:
+      center_pose = pose @ np.linalg.inv(to_origin)
+      vis = draw_posed_3d_box(reader.K, img=color, ob_in_cam=center_pose, bbox=bbox)
+      vis = draw_xyz_axis(color, ob_in_cam=center_pose, scale=0.1, K=reader.K, thickness=3, transparency=0, is_input_rgb=True)
+      #cv2.imshow('1', vis[...,::-1])
+      #cv2.waitKey(1)
+      os.makedirs(f'{debug_dir}/track_vis', exist_ok=True)
+      imageio.imwrite(f'{debug_dir}/track_vis/{i_frame:06d}.png', vis)
+
+    ## Debug level 2: Save the visualization image
+    #if debug>=2:
+    #  os.makedirs(f'{debug_dir}/track_vis', exist_ok=True)
+    #  imageio.imwrite(f'{debug_dir}/track_vis/{i_frame:06d}.png', vis)
+
 
   return result
 
@@ -108,7 +136,7 @@ def run_pose_estimation():
     # Check if object_id is specified in command line
     if opt.object_id is not None and ob_id != opt.object_id:
       continue # Skip this object if it's not the one specified
-    
+
     if use_reconstructed_mesh:
       mesh = reader_tmp.get_reconstructed_mesh(ob_id, ref_view_dir=opt.ref_view_dir)
     else:
