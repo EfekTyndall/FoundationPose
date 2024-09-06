@@ -447,9 +447,9 @@ class YcbVideoReader(BopBaseReader):
       self.ob_id_to_names[ob_id] = names[i]
       self.name_to_ob_id[names[i]] = ob_id
 
-    if 'BOP' not in self.base_dir:
-      with open(f'{self.base_dir}/../../keyframe.txt','r') as ff:
-        self.keyframe_lines = ff.read().splitlines()
+    #if 'BOP' not in self.base_dir:
+    #  with open(f'{self.base_dir}/../../keyframe.txt','r') as ff:
+    #    self.keyframe_lines = ff.read().splitlines()
 
     self.load_symmetry_tfs()
     for ob_id in self.ob_ids:

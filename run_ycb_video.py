@@ -81,7 +81,15 @@ def run_pose_estimation_worker(reader, i_frames, est:FoundationPose, debug=False
 
 def run_pose_estimation():
   wp.force_load(device='cuda')
-  video_dirs = sorted(glob.glob(f'{opt.ycbv_dir}/test/*'))
+
+  # Check if a specific video sequence is added in the command 
+  if opt.video_id:
+    # Process only the specified video sequence
+    video_dirs = [os.path.join(opt.ycbv_dir, 'test', opt.video_id)]
+  else:
+    # Process all video sequences
+    video_dirs = sorted(glob.glob(f'{opt.ycbv_dir}/test/*'))
+
   res = NestDict()
 
   debug = opt.debug
@@ -90,12 +98,17 @@ def run_pose_estimation():
 
   reader_tmp = YcbVideoReader(video_dirs[0])
   glctx = dr.RasterizeCudaContext()
-  mesh_tmp = trimesh.primitives.Box(extents=np.ones((3)), transform=np.eye(4))
+  mesh_tmp = trimesh.primitives.Box(extents=np.ones((3)), transform=np.eye(4)).to_mesh()
   est = FoundationPose(model_pts=mesh_tmp.vertices.copy(), model_normals=mesh_tmp.vertex_normals.copy(), symmetry_tfs=None, mesh=mesh_tmp, scorer=None, refiner=None, glctx=glctx, debug_dir=debug_dir, debug=debug)
 
   ob_ids = reader_tmp.ob_ids
 
   for ob_id in ob_ids:
+
+    # Check if object_id is specified in command line
+    if opt.object_id is not None and ob_id != opt.object_id:
+      continue # Skip this object if it's not the one specified
+    
     if use_reconstructed_mesh:
       mesh = reader_tmp.get_reconstructed_mesh(ob_id, ref_view_dir=opt.ref_view_dir)
     else:
@@ -111,8 +124,8 @@ def run_pose_estimation():
       video_id = reader.get_video_id()
 
       for i in range(len(reader.color_files)):
-        if not reader.is_keyframe(i):
-          continue
+        #if not reader.is_keyframe(i):
+        #  continue
         args.append((reader, [i], est, debug, ob_id, 0))
 
     est.reset_object(model_pts=mesh.vertices.copy(), model_normals=mesh.vertex_normals.copy(), symmetry_tfs=symmetry_tfs, mesh=mesh)
@@ -136,6 +149,13 @@ if __name__=='__main__':
   code_dir = os.path.dirname(os.path.realpath(__file__))
   parser.add_argument('--ycbv_dir', type=str, default="/mnt/9a72c439-d0a7-45e8-8d20-d7a235d02763/DATASET/YCB_Video", help="data dir")
   parser.add_argument('--use_reconstructed_mesh', type=int, default=0)
+
+  # Add argument for a video specific video sequence
+  parser.add_argument('--video_id', type=str, default=None, help='ID of the video sequence to process')
+
+  # Add argument for a specific object
+  parser.add_argument('--object_id', type=int, default=None, help='ID of the object to process')
+
   parser.add_argument('--ref_view_dir', type=str, default="/mnt/9a72c439-d0a7-45e8-8d20-d7a235d02763/DATASET/YCB_Video/bowen_addon/ref_views_16")
   parser.add_argument('--debug', type=int, default=0)
   parser.add_argument('--debug_dir', type=str, default=f'{code_dir}/debug')
